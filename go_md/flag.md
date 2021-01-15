@@ -126,7 +126,7 @@ func String(name string, value string, usage string) *string
 > 通过flag.Bool和flag.String，建立了2个指针b和s，分别指向bool类型和string类型的变量。所以后续要通过 *b 和 *s 使用变量值。
   flag.Bool和flag.String的参数有3个，分别是命令行参数名称，默认值，提示字符串。
 
-   ![flag](http://github.com/xidianlina/go_practice/raw/master/picture/flag.jpg)
+   ![flag](http://github.com/xidianlina/go_practice/raw/master/picture/flag.png)
 
 ## 2.2 解析参数
 > flag使用前，必须首先解析: flag.Parse()
