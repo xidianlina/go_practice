@@ -129,10 +129,11 @@ func String(name string, value string, usage string) *string
    ![flag](http://github.com/xidianlina/go_practice/raw/master/picture/flag.png)
 
 ## 2.2 解析参数
-> flag使用前，必须首先解析: flag.Parse()
+> flag使用前，必须首先解析:   
+flag.Parse()
 
 ## 2.3 使用参数
-通过flag方法定义好的参数变量指针，通过间接引用操作即可使用其内容： 
+通过flag方法定义好的参数变量指针，通过间接引用操作即可使用其内容：  
 fmt.Println("-b:", *b)  
 fmt.Println("-s:", *s)
 
