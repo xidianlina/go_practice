@@ -21,4 +21,5 @@ func main() {
 }
 ```
 运行起来得到的如下：
+   ![args](http://github.com/xidianlina/go_practice/raw/master/picture/args.jpg)
 
