@@ -3,13 +3,13 @@ go语言实践
 # 问题列表
 ## 1.进程、线程和协程的区别
 ## 2.协程并发调度模型
-## 3.
+## 3.defer/panic/recover
 ## 4.
 ## 5.
 ## 6.
 ## 7.
 ## 8.
-## 9.defer/panic/recover
+## 9.
 ## 10.
 # 问题答案
 ## 1.进程、线程和协程的区别
@@ -96,9 +96,32 @@ go语言实践
  主线程在runtime有对应的全局变量runtime.m0来表示。用户线程就是普通的线程了，和p绑定，执行g中的任务。虽然说是有三种，实际上前两种线程整个runtime就只有一个实例。用户线程才会有很多实例。                                       
  主线程中用来跑runtime.main，没有跳转。      
 >                   
->                               
-## 3.
-## 4.
+>参考 https://louyuting.blog.csdn.net/article/details/84790392                                                           
+## 3.channel原理解析
+>channel主要是为了实现go的并发特性，用于并发通信的，也就是在不同的协程单元goroutine之间同步通信。              
+>创建channel时有两种方式，一种是带缓冲的channel，一种是不带缓冲的channel。        
+![channel](http://github.com/xidianlina/go_practice/raw/master/picture/channel.png)                                      
+>创建方式分别如下：                  
+ // buffered                            
+ ch := make(chan Task, 3)                     
+ // unbuffered              
+ ch := make(chan int)       
+>当使用make去创建一个channel的时候，实际上返回的是一个指向channel的pointer，所以能够在不同的function之间直接传递channel对象，而不用通过指向channel的指针。                                            
+>                           
+>不同goroutine在channel上面进行读写时，涉及到的过程比较复杂。G1会往channel里面写入数据，G2会从channel里面读取数据。                     
+ G1作用于底层hchan的流程如下图： 
+![channel2](http://github.com/xidianlina/go_practice/raw/master/picture/channel2.png)                             
+>(1).先获取全局锁；                        
+ (2).然后enqueue元素(通过移动拷贝的方式)；                    
+ (3).释放锁；                   
+ G2读取时候作用于底层数据结构流程如下图所示：  
+![channel3](http://github.com/xidianlina/go_practice/raw/master/picture/channel3.png)                   
+>(1).先获取全局锁；                    
+ (2).然后dequeue元素(通过移动拷贝的方式)；                
+ (3).释放锁；
+>                                     
+                                                                           
+## 4.defer/panic/recover
 ## 5.
 ## 6.
 ## 7.
