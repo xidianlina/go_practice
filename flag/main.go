@@ -17,25 +17,25 @@ func main() {
 
 /*
 ------------------------------------
-$ go run main.go
+$ go run slice.go
 -b: false
 -s:
 其他参数： []
 ------------------------------------
-$ go run main.go -b
+$ go run slice.go -b
 -b: true
 -s:
 其他参数： []
 ------------------------------------
-$ go run main.go -b -s test others
+$ go run slice.go -b -s test others
 -b: true
 -s: test
 其他参数： [others]
 ------------------------------------
-$ go run main.go  -help
+$ go run slice.go  -help
 Usage of /var/folders/0x/55rm67xj28z5v7z1r5pg11lr0000gp/T/go-build514692984/b001/exe/main:
   -b	bool类型参数
   -s string
     	string类型参数
 exit status 2
- */
+*/
