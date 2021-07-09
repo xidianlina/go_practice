@@ -54,7 +54,7 @@ go语言实践
 >确保所有的goroutine都有相对公平的机会使用CPU。                          
  goroutine与内核OS线程的映射关系是M:N，这样多个goroutine就可以在多个内核线程上面运行。goroutine的切换大部分场景下都没有走OS线程的切换所带来的开销，
 >这样整体运行效率相比OS线程的调度会高很多，但是这样带来的问题就是goroutine调度模型的复杂。                                 
->![goroutine](http://github.com/xidianlina/go_practice/raw/master/picture/goroutine.jpg)            
+![goroutine](http://github.com/xidianlina/go_practice/raw/master/picture/goroutine.jpg)            
 >g0是一个特殊的协程，用于执行调度逻辑，以及协程创建销毁等逻辑。g0的栈使用的是内核线程的栈，主要用于局部调度器执行调度逻辑时使用的栈，也就是执行调度逻辑时的线程栈。                                                    
 >调度模型主要有几个主要的实体：G、M、P、schedt。                               
  G：代表一个goroutine实体，它有自己的栈内存，instruction pointer和一些相关信息(比如等待的channel等等)，是用于调度器调度的实体。                     
@@ -64,7 +64,7 @@ go语言实践
 >P的数量也代表了golang代码执行的并发度，即有多少goroutine可以并行的运行。                                   
  schedt：runtime全局调度时使用的数据结构，这个实体其实只是一个壳，里面主要有M的全局idle队列，P的全局idle队列，
 >一个全局的就绪的G队列以及一个runtime全局调度器级别的锁。当对M或P等做一些非局部调度器的操作时，一般需要先锁住全局调度器。                              
->![goroutine2](http://github.com/xidianlina/go_practice/raw/master/picture/goroutine2.jpg)              
+![goroutine2](http://github.com/xidianlina/go_practice/raw/master/picture/goroutine2.jpg)              
 >(1).通过 go func()来创建一个goroutine；                    
  (2).有两个存储goroutine的队列，一个是局部调度器P的local queue、一个是全局调度器数据模型schedt的global queue。
 >新创建的goroutine会先保存在local queue，如果local queue已经满了就会保存在全局的global queue；                       
@@ -89,7 +89,7 @@ go语言实践
  P是使G能够在M中运行的关键。Go的runtime适当地让P与不同的M建立或者断开联系，以使得P中的那些可运行的G能够在需要的时候及时获得运行时机。                                             
  每一个P都必须关联一个M才能使其中的G得以运行。           
 >                       
->![goroutine3](http://github.com/xidianlina/go_practice/raw/master/picture/goroutine3.jpg)                  
+![goroutine3](http://github.com/xidianlina/go_practice/raw/master/picture/goroutine3.jpg)                  
 >                       
 >go中线程的种类，在runtime中有三种线程：               
  一种是主线程,一种是用来跑 sysmon 的线程,一种是普通的用户线程。                   
