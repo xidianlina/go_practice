@@ -1,4 +1,4 @@
-# go_practice
+go_practice
 ======
 问题列表
 ##1.进程、线程和协程的区别
