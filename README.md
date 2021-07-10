@@ -3,8 +3,8 @@ go语言实践
 # 问题列表
 ## 1.进程、线程和协程的区别
 ## 2.协程并发调度模型
-## 3.defer/panic/recover
-## 4.
+## 3.close()关闭channel
+## 4.defer/panic/recover
 ## 5.
 ## 6.
 ## 7.
@@ -100,7 +100,25 @@ go语言实践
 ## 3.channel原理解析
 >channel主要是为了实现go的并发特性，用于并发通信的，也就是在不同的协程单元goroutine之间同步通信。              
 >创建channel时有两种方式，一种是带缓冲的channel，一种是不带缓冲的channel。        
-![channel](http://github.com/xidianlina/go_practice/raw/master/picture/channel.png)                                      
+![channel](http://github.com/xidianlina/go_practice/raw/master/picture/channel.png)         
+```go
+//channel结构体
+
+//path:src/runtime/chan.go
+type hchan struct {
+  qcount uint          // 当前队列列中剩余元素个数
+  dataqsiz uint        // 环形队列长度，即可以存放的元素个数
+  buf unsafe.Pointer   // 环形队列列指针
+  elemsize uint16      // 每个元素的⼤⼩
+  closed uint32        // 标识关闭状态
+  elemtype *_type      // 元素类型
+  sendx uint           // 队列下标，指示元素写⼊入时存放到队列列中的位置 x
+  recvx uint           // 队列下标，指示元素从队列列的该位置读出  
+  recvq waitq          // 等待读消息的goroutine队列
+  sendq  waitq         // 等待写消息的goroutine队列
+  lock mutex           // 互斥锁，chan不允许并发读写
+} 
+```                                      
 >创建方式分别如下：                  
  // buffered                            
  ch := make(chan Task, 3)                     
@@ -154,13 +172,275 @@ go语言实践
  (2).channel的send和recv队列，队列里面都是持有goroutine的sudog元素，队列都是双链表实现的。                  
  (3).channel的全局锁。                    
 >                   
->
- 
- 
-                                     
-                                                                           
-## 4.defer/panic/recover
-## 5.
+>向channel写数据流程图:
+![channel4](http://github.com/xidianlina/go_practice/raw/master/picture/channel4.png)                                   
+>从channel读数据流程图:                                           
+![channel5](http://github.com/xidianlina/go_practice/raw/master/picture/channel5.png)                               
+## 4.close()关闭channel 
+>没有简单易行的方法去检查管道是否没有通过改变它的状态来关闭。                     
+ 关闭一个已经关闭的管道会触发 panic，所以，关闭者不知道管道是否关闭仍去关闭它，这是一个危险的行为。                   
+ 发送数据到一个关闭的管道会触发 panic, 所以，发送者不知道管道是否关闭仍去发送消息给它，这是一个危险的行为。                      
+>                                                                    
+>通道关闭原则                                 
+ 使用通道是不允许接收方关闭通道和不能关闭一个有多个并发发送者的通道。换而言之，只能在发送方的 goroutine 中关闭只有该发送方的通道。                             
+>                               
+>close 内置函数关闭一个通道，该通道必须是双向的或仅发送的。                           
+ 如下关闭 ch3 就会报错 invalid operation: close(ch3) (cannot close receive-only channel)                        
+ ch1 := make(chan int, 10)                      
+ ch2 := make(chan<- int, 10)                    
+ ch3 := make(<-chan int, 10)                    
+ close(ch1)                 
+ close(ch2)                 
+ close(ch3)                     
+ channel应仅由发送方执行，而不应由接收方执行，并且在收到最后发送的值后具有关闭通道的效果。即channel应该由发送的一方执行，由接收channel的一方关闭                                            
+>               
+>向已经关闭的channel中写入数据会发生Panic             
+ 关闭已经关闭的channel会发生Panic                 
+ 关闭值为nil的channel会发生Panic                
+>                       
+>正确的关闭channel方法                     
+>(1).通过defer+recover机制来判断                       
+```go
+func SafeCloseChannel(ch chan int) (justClosed bool) {
+	defer func() {
+		if recover() != nil {
+			justClosed = false
+		}
+	}()
+
+	close(ch)
+	return true
+}
+```               
+>(2).采用sync.Once，保证channel只关闭一次
+```go
+type MyChannel struct{
+   C chan struct{}
+   once sync.Once
+}
+
+func NewMyChannel() *MyChannel{
+   return &MyChannel{C:make(chan struct{})}
+}
+
+func (mc *MyChannel) SafeClose(){
+   mc.once.Do(func(){
+      close(mc.C)
+   })
+}
+```                                                  
+>(3).采用与sync.Once类似的方式保证channel只关闭一次，用sync.Mutex加锁实现
+```go
+type MyChannel2 struct{
+   C chan struct{}
+   closed bool
+   mutex sync.Mutex
+}
+
+func NewMyChannel2() *MyChannel2{
+   return &MyChannel2{C:make(chan struct{})}
+}
+
+func (mc *MyChannel2) SafeClose(){
+   mc.mutex.Lock()
+   if !mc.closed{
+      close(mc.C)
+      mc.closed=true
+   }
+   
+   mc.mutex.Unlock()
+}
+
+func (mc *MyChannel2) IsClosed() bool{
+   mc.mutex.Lock()
+   defer mc.mutex.Unlock()
+   
+   return mc.closed
+}
+```                                                        
+>如何优雅关闭channel                                  
+>(1).发送者：接收者=1：1 直接在发送端关闭
+```go
+// 生产者：消费者=1：1
+func test11() {
+	chanInt := make(chan int)
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	//生产者1个
+	go func(ci chan int) {
+		defer wg.Done()
+
+		for i := 0; i < 10; i++ {
+			chanInt <- i
+		}
+		//关闭channel
+		close(chanInt)
+
+	}(chanInt)
+
+	//消费者1个
+	go func(ci chan int) {
+		defer wg.Done()
+
+		for v := range ci {
+			fmt.Println(v)
+		}
+	}(chanInt)
+
+	wg.Wait()
+}
+``` 
+>(2).发送者：接收者=1：N 也直接在发送端关闭                      
+```go
+// 生产者：消费者=1：N
+func test1N() {
+	chanInt := make(chan int)
+	wg := sync.WaitGroup{}
+
+	wg.Add(3)
+
+	//生产者1个
+	go func(ci chan int) {
+		defer wg.Done()
+
+		for i := 0; i < 10; i++ {
+			ci <- i
+		}
+
+		//关闭channel
+		close(ci)
+
+	}(chanInt)
+
+	//消费者2个
+	go func(ci chan int) {
+		defer wg.Done()
+
+		for v := range ci {
+			fmt.Println("consumer 1, ", v)
+		}
+	}(chanInt)
+
+	go func(ci chan int) {
+		defer wg.Done()
+
+		for v := range ci {
+			fmt.Println("consumer 2, ", v)
+		}
+
+	}(chanInt)
+
+	wg.Wait()
+}
+```
+>(3).发送者：接收者=N:1 不能在发送者中关闭，因为发送者有多个，一个思路是将关闭的操作从发送者处理逻辑内部提取到外面，放在一个单独的goroutine中去做，
+>等待所有的发送者发送完成之后，在关闭的goroutine中进行关闭。                 
+```go
+// 生产者：消费者=N:1
+func testN1() {
+	chanInt := make(chan int)
+	wg := sync.WaitGroup{}
+
+	wgProducer := sync.WaitGroup{}
+
+	wg.Add(4)
+
+	//生产者2个
+	wgProducer.Add(2)
+
+	//生产者1
+	go func(ci chan int) {
+		defer wg.Done()
+		defer wgProducer.Done()
+
+		for i := 0; i < 10; i++ {
+			ci <- i
+		}
+	}(chanInt)
+
+	//生产者2
+	go func(ci chan int) {
+		defer wg.Done()
+		defer wgProducer.Done()
+
+		for i := 10; i < 20; i++ {
+			ci <- i
+		}
+	}(chanInt)
+
+	//消费者1个
+	go func(ci chan int) {
+		defer wg.Done()
+
+		for v := range ci {
+			fmt.Println(v)
+		}
+	}(chanInt)
+
+	//关闭channel goroutine
+	go func(ci chan int) {
+		defer wg.Done()
+
+		wgProducer.Wait()
+		close(ci)
+	}(chanInt)
+
+	wg.Wait()
+}
+```                                     
+>(4).发送者：接收者=M:N                
+```go
+// 生产者：消费者=M:N
+func testMN() {
+	chanInt := make(chan int)
+	wg := sync.WaitGroup{}
+	wgProducer := sync.WaitGroup{}
+	//生产者2个
+	wgProducer.Add(2)
+	wg.Add(5)
+
+	//生产者1
+	go func(ci chan int) {
+		defer wg.Done()
+		defer wgProducer.Done()
+
+		for i := 0; i < 10; i++ {
+			ci <- i
+		}
+	}(chanInt)
+	//生产者2
+	go func(ci chan int) {
+		defer wg.Done()
+		defer wgProducer.Done()
+
+		for i := 10; i < 20; i++ {
+			ci <- i
+		}
+	}(chanInt)
+
+	//消费者1
+	for i := 0; i < 2; i++ {
+		go func(ci chan int, id int) {
+			defer wg.Done()
+
+			for v := range ci {
+				fmt.Printf("receive from consumer %d, %d\n", id, v)
+			}
+		}(chanInt, i)
+	}
+	//消费者2
+	go func() {
+		defer wg.Done()
+		wgProducer.Wait()
+		close(chanInt)
+	}()
+
+	wg.Wait()
+}
+```                                                              
+## 5.defer/panic/recover
 ## 6.
 ## 7.
 ## 8.
