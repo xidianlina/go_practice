@@ -108,18 +108,56 @@ go语言实践
  ch := make(chan int)       
 >当使用make去创建一个channel的时候，实际上返回的是一个指向channel的pointer，所以能够在不同的function之间直接传递channel对象，而不用通过指向channel的指针。                                            
 >                           
+>channel有三种类型，分别为只能接收，只能发送，既能接收也能发送这三种类型。因此它的语法为：                                       
+ chan<- struct{} // 只能发送struct                                      
+ <-chan struct{} // 只能从chan里接收struct                            
+ chan string // 既能接收也能发送                                 
+>                                                                      
 >不同goroutine在channel上面进行读写时，涉及到的过程比较复杂。G1会往channel里面写入数据，G2会从channel里面读取数据。                     
  G1作用于底层hchan的流程如下图： 
 ![channel2](http://github.com/xidianlina/go_practice/raw/master/picture/channel2.png)                             
 >(1).先获取全局锁；                        
  (2).然后enqueue元素(通过移动拷贝的方式)；                    
- (3).释放锁；                   
- G2读取时候作用于底层数据结构流程如下图所示：  
+ (3).释放锁；
+>                                                      
+>G2读取时候作用于底层数据结构流程如下图所示：  
 ![channel3](http://github.com/xidianlina/go_practice/raw/master/picture/channel3.png)                   
 >(1).先获取全局锁；                    
  (2).然后dequeue元素(通过移动拷贝的方式)；                
  (3).释放锁；
->                                     
+>                   
+>写入满channel的场景                                
+>goroutine是用户空间的线程，创建和管理协程都是通过Go的runtime，而不是通过OS的thread。但是Go的runtime调度执行goroutine却是基于OS thread的。                    
+>当向已经满的channel里面写入数据时候，会发生什么呢？              
+>(1).当前goroutine（G1）会调用gopark函数，将当前协程置为waiting状态；                       
+ (2).将M和G1绑定关系断开；                       
+ (3).scheduler会调度另外一个就绪态的goroutine与M建立绑定关系，然后M会运行另外一个G。             
+>                   
+>所以整个过程中，OS thread会一直处于运行状态，不会因为协程G1的阻塞而阻塞。最后当前的G1的引用会存入channel的sender队列(队列元素是持有G1的sudog)。                  
+>                       
+>当有一个receiver接收channel数据的时候，会恢复G1。                                        
+ (1).G2调用 t:=<-ch 获取一个元素；                       
+ (2).从channel的buffer里面取出一个元素；                   
+ (3).从sender等待队列里面pop一个sudog；                   
+ (4).将数据复制到buffer中对头位置，然后更新buffer的sendx和recvx索引值；               
+ (5).G2会调用goready(G1)，唤起scheduler的调度；                   
+ (6).scheduler将G1设置成Runable状态；                  
+ (7).G1会加入到局部调度器P的local queue队列，等待运行。                               
+>                                   
+>读取空channel的场景                      
+ 当channel的buffer里面为空时，这时候如果G2首先发起了读取操作。                 
+ 创建一个sudog，将代表G2的sudog存入recvq等待队列。然后G2会调用gopark函数进入等待状态，让出OS thread，然后G2进入阻塞态。                  
+ 如果有一个G1执行写入操作,G1直接把数据写入到G2的栈中。这样G2不需要去获取channel的全局锁和操作缓冲。                      
+>               
+>channel的数据结构：                  
+ (1).一个数组实现的环形队列，数组有两个下标索引分别表示读写的索引，用于保存channel缓冲区数据。               
+ (2).channel的send和recv队列，队列里面都是持有goroutine的sudog元素，队列都是双链表实现的。                  
+ (3).channel的全局锁。                    
+>                   
+>
+ 
+ 
+                                     
                                                                            
 ## 4.defer/panic/recover
 ## 5.
