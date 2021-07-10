@@ -3,9 +3,9 @@ go语言实践
 # 问题列表
 ## 1.进程、线程和协程的区别
 ## 2.协程并发调度模型
-## 3.close()关闭channel
-## 4.defer/panic/recover
-## 5.
+## 3.channel原理解析
+## 4.close()关闭channel
+## 5.defer/panic/recover
 ## 6.
 ## 7.
 ## 8.
