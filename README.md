@@ -1182,7 +1182,204 @@ func simpleSet(c *int){
 >                                                                    
 >参考 https://louyuting.blog.csdn.net/article/details/103359762                   
 ## 10.go的slice
->
+>slice（切片）是一种数组结构，相当于是一个动态的数组，可以按需自动增长和缩小。          
+>底层就是数组，所以数组具有的优点，slice都有。且slice支持可以通过append向slice中追加元素，长度不够时会动态扩展，通过再次slice切片，可以得到得到更小的slice结构，可以迭代、遍历等。               
+>每一个slice结构都由3部分组成：容量(capacity)、长度(length)和指向底层数组某元素的指针，它们各占8字节，所以任何一个slice都是24字节(3个机器字长)。              
+ Pointer：表示该slice结构从底层数组的哪一个元素开始，该指针指向该元素               
+ Capacity：即底层数组的长度，表示这个slice目前最多能扩展到这么长             
+ Length：表示slice当前的长度，如果追加元素，长度不够时会扩展，最大扩展到Capacity的长度(不完全准确，后面数组自动扩展时解释)，所以Length必须不能比Capacity更大，否则会报错                  
+ 通过len()函数获取slice的长度，通过cap()函数获取slice的Capacity。         
+>       
+>                                                               
+>那么为什么需要slice呢？
+ 在GO语言中，数组是一个值，在进行传参和赋值操作时，都会将数组拷贝一份，当数组较大时耗费较多资源；使用数组的指针会较为麻烦          
+ slice是引用类型，传参时不需要再用到指针；slice本质上是数组的指针，所以传参时不需要拷贝数组，耗费较小；可以动态改变数组大小，使用更加的方便                 
+>           
+>                      
+>slice的常用操作         
+>(1).slice的创建       
+```go
+package main
+
+import "fmt"
+
+func main() {
+	//1.使用内置的make函数
+	slice := make([]string, 5) //只指定长度，则默认容量和长度相等
+	/*指定长度和容量，容量不能小于长度。声明一个长度为5、数据类型为string的底层数组，
+	  然后从这个底层数组中从前向后取3个元素(即index从0到2)作为slice的结构。*/
+	slice = make([]string, 3, 5)
+	for k, v := range slice {
+		fmt.Println(k, v)
+	}
+
+	//2.使用切片字面量
+	slice = []string{"dog", "cat", "bear"} //其长度和容量都是3
+	slice = []string{99: "0"}              //使用索引声明切片,创建了一个长度为100的切片
+	for k, v := range slice {
+		fmt.Println(k, v)
+	}
+
+	//3.声明时不做任何初始化就会创建一个nil切片
+	var s []int
+	s := *new([]int) //new 产生的是指针，需要用*
+
+	//4.声明空切片
+	s1 := make([]int, 0) //使用make
+	s2 := []int{}        //使用切片字面量
+}
+```
+>                       
+>(2).空切片与nil切片的区别:                  
+ nil切片=nil, 而空切片!=nil，在使用切片进行逻辑运算时尽量不要使用空切片             
+ 空切片指针指向一个特殊的zerobase地址，而nil为0              
+ 在JSON序列化有区别：nil切片为{“values":null}, 而空切片为{"value" []}           
+>nil slice不会指向底层数组，而空slice会指向底层数组，只不过这个底层数组暂时是空数组。                  
+>无论是nil slice还是empty slice，都可以对它们进行操作，如append()函数、len()函数和cap()函数。                           
+>                   
+>(3).增加元素           
+>使用内置函数append添加元素           
+>append()返回一个新的slice，原始的slice会保留不变。         
+>append()的结果必须被使用。所谓被使用，可以将其输出、可以赋值给某个slice。如果将append()放在空上下文将会报错：append()已评估，但未使用          
+>切片增长会改变长度，容量不一定，需要看可用容量，当容量不足时会分配一个新的底层数组，将现有的值复制到新数组再添加新的值。                                        
+>(4).复制切片           
+>func copy(dst, src []Type) int                 
+>将src slice拷贝到dst slice，src比dst长，就截断，src比dst短，则只拷贝src那部分。               
+ copy的返回值是拷贝成功的元素数量，所以也就是src slice或dst slice中最小的那个长度。       
+```go
+package main
+
+import "fmt"
+
+func main() {
+	s1 := []int{11, 22, 33}
+	s2 := make([]int, 5)
+	s3 := make([]int, 2)
+
+	num := copy(s2, s1)
+	copy(s3, s1)
+
+	fmt.Println(num) // 3
+	fmt.Println(s2)  // [11,22,33,0,0]
+	fmt.Println(s3)  // [11,22]
+}
+```                              
+>(5).删除元素，内置没有提供                
+>内置没有提供，简单实现一下:             
+```go
+package main
+import "fmt"
+
+func delete_slice(index int, s []int) []int {
+	s1 := s[:index]
+	s1 = append(s1, s[index+1:]...)
+	return s1
+}
+
+func main() {
+	slice := []int{1, 2, 3, 4, 5}
+	for k, v := range slice {
+		fmt.Println(k, v)
+	}
+	slice = delete_slice(2, slice)
+	fmt.Println("-----------")
+	for k, v := range slice {
+		fmt.Println(k, v)
+	}
+}
+```            
+>               
+>                   
+>扩容                     
+>当slice的length已经等于capacity时，再使用append()给slice追加元素，会自动扩展底层数组的长度。         
+ 底层数组扩展时，会生成一个新的底层数组。所以旧底层数组仍然会被旧slice引用，新slice和旧slice不再共享同一个底层数组。              
+>           
+>当底层数组需要扩容时，会按照当前底层数组capacity的2倍进行扩容，并生成新数组。如果底层数组的capacity超过1000时，
+>将按照25%的比率扩容，也就是1000个元素时，将扩展为1250个，不过这个增长比率的算法可能会随着go版本的递进而改变。                          
+```go
+package main
+
+import "fmt"
+
+func main() {
+	my_slice := []int{11, 22, 33, 44, 55}
+	new_slice := append(my_slice, 66)
+
+	my_slice[3] = 444 // 修改旧的底层数组
+
+	fmt.Println(my_slice)  // [11 22 33 444 55]
+	fmt.Println(new_slice) // [11 22 33 44 55 66]
+
+	fmt.Println(len(my_slice), ":", cap(my_slice))   // 5:5
+	fmt.Println(len(new_slice), ":", cap(new_slice)) // 6:10
+}
+```     
+>           
+>                   
+>合并slice        
+>slice和数组其实一样，都是一种值，可以将一个slice和另一个slice进行合并，生成一个新的slice。            
+ 合并slice时，只需将append()的第二个参数后加上...即可，即append(s1,s2...)表示将s2合并在s1的后面，并返回新的slice。          
+ append()最多允许两个参数，将append()作为另一个append()的参数，可以实现多级合并。       
+```go
+package main
+import "fmt"
+
+func main() {
+	s1 := []int{1, 2}
+	s2 := []int{3, 4}
+	s3 := append(s1, s2...)
+	fmt.Println(s3) // [1 2 3 4]
+
+	s4 := []int{7, 8}
+	s5 := []int{5, 6}
+	s := append(s1, append(s2, append(s4, s5...)...)...)
+	fmt.Println(s) // [1 2 3 4 7 8 5 6]
+}
+```         
+>               
+>           
+>传递slice给函数     
+>虽然slice实际上包含了3个属性，它的数据结构类似于[3/5]0xc42003df10，但仍可以将slice看作一种指针。这个特性直接体现在函数参数传值上。            
+ Go中函数的参数是按值传递的，所以调用函数时会复制一个参数的副本传递给函数。如果传递给函数的是slice，它将复制该slice副本给函数，
+>这个副本实际上就是[3/5]0xc42003df10，所以传递给函数的副本仍然指向源slice的底层数组。      
+ 换句话说，如果函数内部对slice进行了修改，有可能会直接影响函数外部的底层数组，从而影响其它slice。但并不总是如此，例如函数内部对slice进行扩容，
+>扩容时生成了一个新的底层数组，函数后续的代码只对新的底层数组操作，这样就不会影响原始的底层数组。           
+```go
+package main
+
+import "fmt"
+
+func main() {
+	s1 := []int{11, 22, 33, 44}
+	foo(s1)
+	fmt.Println(s1[1]) // 输出：23
+
+	slice := []int{1, 2, 3, 4, 5}
+	sliceModify(slice)
+	fmt.Println(cap(slice))
+	fmt.Println(slice) // [1 2 3 4 5]
+	fmt.Printf("%p", slice)
+}
+
+func foo(s []int) {
+	for index, _ := range s {
+		s[index] += 1
+	}
+}
+
+func sliceModify(slice []int) {
+	slice = append(slice, 6)
+	fmt.Printf("%p", slice)
+}
+```                        
+>               
+>                              
+>slice和内存浪费问题           
+>由于slice的底层是数组，很可能数组很大，但slice所取的元素数量却很小，这就导致数组占用的绝大多数空间是被浪费的。               
+ 垃圾回收器(GC)不会回收正在被引用的对象，当一个函数直接返回指向底层数组的slice时，这个底层数组将不会随函数退出而被回收，
+>而是因为slice的引用而永远保留，除非返回的slice也消失。因此，当函数的返回值是一个指向底层数组的数据结构时(如slice)，
+>应当在函数内部将slice拷贝一份保存到一个使用自己底层数组的新slice中，并返回这个新的slice。这样函数一退出，
+>原来那个体积较大的底层数组就会被回收，保留在内存中的是小的slice。                        
 ## 11.go的值传递和引用传递
 >
 ## 12.go的context包
