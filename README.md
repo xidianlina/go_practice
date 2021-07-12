@@ -1381,8 +1381,147 @@ func sliceModify(slice []int) {
 >应当在函数内部将slice拷贝一份保存到一个使用自己底层数组的新slice中，并返回这个新的slice。这样函数一退出，
 >原来那个体积较大的底层数组就会被回收，保留在内存中的是小的slice。                        
 ## 11.go的值传递和引用传递
->
+>基本类型：如byte、int、bool、float32、float64和string等；               
+ 复杂类型：如数组(array)、结构体(struct）、指针（pointer）、slice、map、channel、function、pointer等                
+>               
+>切片：指向数组（array）的一个区间                
+ map：极其常见的数据结构，提供键值查询的能力            
+ channel：执行体（goroutine）间提供的通信设施             
+ 接口（interface）：对一组满足某个契约的类型的抽象              
+>                              
+>golang默认都是采用值传递，即拷贝传递                  
+ 有些值天生就是指针，如slice、map、channel、function、pointer,即指针传递                
+ map和slice都是指针传递，即函数内部是可以改变参数的值的。而array是数组传递，不管函数内部如何改变参数，都是改变的拷贝值，并未对原值进行处理。               
+ 值传递相当于是复制了一份。而引用传递，是复制了相同的指针地址。                    
 ## 12.go的context包
+>context是GO1.7版本加入的一个标准库，它定义了Context类型，专门用来简化对于处理单个请求的多个 goroutine 之间与请求域的数据、取消信号、截止时间等相关操作，这些操作可能涉及多个API调用。            
+ 对服务器传入的请求应该创建上下文，而对服务器的传出调用应该接受上下文。它们之间的函数调用链必须传递上下文，或者可以使用WithCancel、WithDeadline、WithTimeout或WithValue创建的派生上下文。          
+ 当一个上下文被取消时，它派生的所有上下文也被取消。当一个goroutine在衍生一个goroutine时，context可以跟踪到子goroutine，从而达到控制他们的目的。           
+>当前协程取消了，可以通知所有由它创建的子协程退出           
+ 当前协程取消了，不会影响到创建它的父级协程的状态               
+>           
+>                      
+>context接口              
+ type Context interface {               
+     Deadline() (deadline time.Time, ok bool)               
+     Done() <-chan struct{}             
+     Err() error                    
+     Value(key interface{}) interface{}             
+ }                  
+>Context接口共有4个方法:               
+ Deadline:是获取设置的截止时间，第一个返回值是截止时间，到了这个时间点，Context会自动发起取消请求；
+>第二个返回值 ok==false 时表示没有设置截止时间，如果需要取消的话，需要调用取消函数进行取消。                                   
+ Done:该方法返回一个只读的chan，类型为 struct{}，在goroutine中，如果该方法返回的chan可以读取，
+>则意味着parent context已经发起了取消请求，通过Done方法收到这个信号后，就应该做清理操作，然后退出goroutine，释放资源。               
+ Err:方法返回取消的错误原因，因为什么 Context 被取消。          
+ Value方法获取该 Context 上绑定的值，是一个键值对，所以要通过一个 Key 才可以获取对应的值，这个值一般是线程安全的。                     
+ 四个方法中常用的就是 Done 了，如果 Context 取消的时候，就可以得到一个关闭的 chan，关闭的 chan 是可以读取的，
+>所以只要可以读取的时候，就意味着收到 Context 取消的信号了。         
+>以下是这个方法的经典用法:                  
+>func Stream(ctx context.Context, out chan<- Value) error {                 
+     for {              
+         v, err := DoSomething(ctx)         
+         if err != nil {            
+           return err           
+         }      
+         select {                      
+         case <-ctx.Done():                 
+           return ctx.Err()             
+         case out <- v:                     
+         }              
+     }                  
+   }            
+>           
+>               
+>Context接口并不需要我们实现，Go内置已经实现了2个，代码中最开始都是以这两个内置的作为最顶层的partent context，衍生出更多的子Context。         
+```go
+var (
+	background = new(emptyCtx)
+	todo       = new(emptyCtx)
+)
+
+// Background returns a non-nil, empty Context. It is never canceled, has no
+// values, and has no deadline. It is typically used by the main function,
+// initialization, and tests, and as the top-level Context for incoming
+// requests.
+func Background() Context {
+	return background
+}
+
+// TODO returns a non-nil, empty Context. Code should use context.TODO when
+// it's unclear which Context to use or it is not yet available (because the
+// surrounding function has not yet been extended to accept a Context
+// parameter).
+func TODO() Context {
+	return todo
+}
+```
+>Background()主要用于main函数、初始化以及测试代码中，作为Context这个树结构的最顶层的Context，也就是根Context。              
+ TODO()，它目前还不知道具体的使用场景，如果我们不知道该使用什么 Context 的时候，可以使用这个。             
+ 它们两个本质上都是 emptyCtx 结构体类型，是一个不可取消，没有设置截止时间，没有携带任何值的 Context。      
+>           
+```go
+// An emptyCtx is never canceled, has no values, and has no deadline. It is not
+// struct{}, since vars of this type must have distinct addresses.
+type emptyCtx int
+
+func (*emptyCtx) Deadline() (deadline time.Time, ok bool) {
+	return
+}
+
+func (*emptyCtx) Done() <-chan struct{} {
+	return nil
+}
+
+func (*emptyCtx) Err() error {
+	return nil
+}
+
+func (*emptyCtx) Value(key interface{}) interface{} {
+	return nil
+}
+
+func (e *emptyCtx) String() string {
+	switch e {
+	case background:
+		return "context.Background"
+	case todo:
+		return "context.TODO"
+	}
+	return "unknown empty Context"
+}
+```   
+>emptyCtx实现Context接口的方法，可以看到，这些方法什么都没做，返回的都是 nil 或者零值。          
+>           
+>       
+>Context的继承衍生:
+ context包提供了With系列的函数，衍生了更多的子Context。               
+>func WithCancel(parent Context) (ctx Context, cancel CancelFunc)                   
+ func WithDeadline(parent Context, deadline time.Time) (Context, CancelFunc)            
+ func WithTimeout(parent Context, timeout time.Duration) (Context, CancelFunc)          
+ func WithValue(parent Context, key, val interface{}) Context           
+>这四个With函数，接收的都有一个partent参数，就是父Context，基于这个父Context创建出子Context。
+>通过这些函数，就创建了一颗Context树，树的每个节点都可以有任意多个子节点，节点层级可以有任意多个。                   
+ WithCancel函数，传递一个父Context作为参数，返回子Context，以及一个取消函数用来取消Context。                   
+ WithDeadline函数，和 WithCancel 差不多，它会多传递一个截止时间参数，意味着到了这个时间点，会自动取消 Context，当然也可以不等到这个时候，可以提前通过取消函数进行取消。                    
+ WithTimeout函数和WithDeadline 基本上一样，这个表示是超时自动取消，是多少时间后自动取消 Context 的意思。               
+ 这3个函数都会返回一个取消函数CancelFunc，这是一个函数类型，它的定义非常简单type CancelFunc func(),该函数可以取消一个 Context，
+>以及这个节点 Context下所有的所有的 Context，不管有多少层级。         
+>                                
+>WithValue函数和取消Context无关，它是为了生成一个绑定了一个键值对数据的Context，即给context设置值，这个绑定的数据可以通过Context.Value方法访问到.                         
+>context.WithValue 方法附加一对 K-V 的键值对，这里 Key 必须是等价性的，也就是具有可比性；Value 值要是线程安全的。                        
+ 在使用值的时候，可以通过 Value 方法读取 ctx.Value(key)。                            
+ 使用 WithValue 传值，一般是必须的值，不要什么值都传递。          
+>               
+>       
+>Context最佳实战                
+ 不要把 Context 放在结构体中，要以参数的方式传递               
+ 以 Context 作为参数的函数方法，应该把 Context 作为第一个参数，放在第一位              
+ 给一个函数方法传递 Context 的时候，不要传递 nil，如果不知道传递什么，就使用 context.TODO              
+ Context 的 Value 相关方法应该传递必须的数据，不要什么数据都使用这个传递            
+ Context 是线程安全的，可以放心的在多个 goroutine 中传递          
+>       
+>参考 https://www.cnblogs.com/vinsent/p/11455531.html                                                   
 ## 13.
 ## 14.
 ## 15.
