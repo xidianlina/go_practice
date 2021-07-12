@@ -13,7 +13,7 @@ go语言实践
 ## 10.go的slice
 ## 11.go的值传递和引用传递
 ## 12.go的context包
-## 13.
+## 13.go调度中阻塞都有那些方式
 ## 14.
 ## 15.
 # 问题答案
@@ -1522,6 +1522,282 @@ func (e *emptyCtx) String() string {
  Context 是线程安全的，可以放心的在多个 goroutine 中传递          
 >       
 >参考 https://www.cnblogs.com/vinsent/p/11455531.html                                                   
-## 13.
-## 14.
-## 15.
+## 13.go调度中阻塞都有那些方式
+>系统调用 syscall、网络IO network input、协程等待 channel operations、锁primitives in the sync package                
+>(1).系统调用 syscall       
+>当调用一些系统方法时，如果系统方法调用发生阻塞，这种情况下，网络轮询器（NetPoller）无法使用，而进行系统调用的 Goroutine 将阻塞当前M。              
+ 同步系统调用（如文件 I/O）会导致 M 阻塞的情况：                
+ G1 将进行同步系统调用以阻塞M1。             
+ 调度器识别出G1已导致M1阻塞，调度器将M1与P分离，同时也将G1带走。然后调度器引入新的M2来服务P。此时，可以从LRQ中选择G2并在M2上进行上下文切换。                
+ 阻塞的系统调用完成后,G1可以移回LRQ并再次由P执行。如果这种情况再次发生，M1将被放在旁边以备将来重复使用。           
+>           
+>(2).网络IO network input                      
+>由于网络请求和IO操作导致Goroutine阻塞。                  
+ Go程序提供了网络轮询器（NetPoller）来处理网络请求和IO操作的问题，其后台通过kqueue（MacOS），epoll（Linux）或 iocp（Windows）来实现IO多路复用。                
+ 通过使用NetPoller进行网络系统调用，调度器可以防止Goroutine在进行这些系统调用时阻塞M。这可以让M执行P的LRQ中其他的Goroutines，而不需要创建新的M。有助于减少操作系统上的调度负载。          
+ 例如:G1正在M上执行，还有3个Goroutine在LRQ上等待执行。网络轮询器空闲着，什么都没干。             
+ 接下来，G1 想要进行网络系统调用，因此它被移动到网络轮询器并且处理异步网络系统调用。然后，M 可以从 LRQ 执行另外的 Goroutine。此时，G2 就被上下文切换到 M 上了。           
+ 最后，异步网络系统调用由网络轮询器完成，G1 被移回到 P 的 LRQ 中。一旦 G1 可以在 M 上进行上下文切换，它负责的 Go 相关代码就可以再次执行。
+>这里的最大优势是，执行网络系统调用不需要额外的 M。网络轮询器使用系统线程，它时刻处理一个有效的事件循环。          
+>           
+>(3).协程等待 channel operations                       
+>如果在Goroutine去执行一个sleep操作，导致M被阻塞了。              
+ Go程序后台有一个监控线程sysmon，它监控那些长时间运行的G任务然后设置可以强占的标识符，别的Goroutine就可以抢先进来执行。               
+ 只要下次这个 Goroutine 进行函数调用，那么就会被强占，同时也会保护现场，然后重新放入P的本地队列里面等待下次执行。         
+>           
+>(4).锁primitives in the sync package            
+>由于原子、互斥量或通道操作调用导致 Goroutine 阻塞，调度器将把当前阻塞的 Goroutine 切换出去，重新调度 LRQ 上的其他 Goroutine；          
+>           
+>               
+>4种阻塞可以分为两类：                
+ 分类1 (对应情况1): (G,M都被阻塞,P可用,要利用起来)                   
+ 系统调用(open file)            
+ 分类2 (对应情况2,3,4): (只G阻塞,M,P可用的，要利用起来)               
+ 用户代码层面的阻塞(channel,锁), 此时M可以换上其他G继续执行。          
+ 网络阻塞 (netpoller实现G网络阻塞不会导致M被阻塞，仅阻塞G)。                         
+## 14.go 怎么实现func的自定义参数
+```go
+package main
+import "fmt"
+
+type MyFunc func(string) string
+
+func testFunc(s string, myFunc MyFunc) {
+	myFunc(s)
+}
+
+func protect(unprotected func(...interface{})) func(...interface{}) {
+	return func(args ...interface{}) {
+		fmt.Println("protected")
+		unprotected(args...)
+	}
+}
+
+func main() {
+	testFunc("happy", func(s string) string {
+		fmt.Println(s)
+		return s
+	})
+
+	protect(func(args ...interface{}) {
+		for k, v := range args {
+			fmt.Println(k, v)
+		}
+	})([]string{"a", "b", "c"})
+}
+```
+## 15.用go手写生产者和消费者
+>sync包提供了基本的同步基元，如互斥锁。除了Once和WaitGroup类型，大部分都是适用于低水平程序线程，高水平的同步使用channel通信更好一些。             
+>(1).使用“同步锁”的方式
+```go
+package main
+
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
+var (
+	product = 0
+	lock    sync.Mutex
+	cond    = sync.NewCond(&lock)
+)
+
+func producer() {
+	for {
+		cond.L.Lock()
+
+		for product > 10 {
+			fmt.Println("生产完了！")
+			cond.Wait()
+		}
+
+		fmt.Println("生产中...", product)
+		product += 1
+
+		cond.L.Unlock()
+
+		cond.Broadcast()
+	}
+}
+
+func consumer() {
+	for {
+		cond.L.Lock()
+
+		for product <= 0 {
+			fmt.Println("消费完了！")
+			cond.Wait()
+		}
+
+		fmt.Println("消费中...", product)
+		product -= 1
+
+		cond.L.Unlock()
+
+		cond.Broadcast()
+	}
+}
+
+func main() {
+	go producer()
+	go consumer()
+
+	time.Sleep(time.Second * 60)
+	fmt.Println("主线程结束！")
+}
+```                      
+>(2).使用channel方式实
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func producer2(intChan chan int) {
+	for i := 0; i < cap(intChan); i++ {
+		fmt.Println("生产者：", i)
+		intChan <- i
+	}
+
+	// 写完后关闭掉
+	close(intChan)
+}
+
+func consumer2(intChan chan int, exitChan chan bool) {
+	for {
+		v, ok := <-intChan
+		if ok {
+			fmt.Println("消费者：", v)
+		}
+
+		time.Sleep(time.Second)
+
+		exitChan <- true
+		close(exitChan)
+	}
+}
+
+func main() {
+	intChan := make(chan int, 10)  // “生产者”和“消费者”之间互相通信的桥梁，这里假设生产的元素就是int类型的数字
+	exitChan := make(chan bool, 1) // 退出的channel，因为仅做为一个标志所以空间为一个元素就够了
+	go producer2(intChan)
+	go consumer2(intChan, exitChan)
+
+	// 1) for循环的等待判断
+	// for {
+	// 	_, ok := <-exitChan
+	// 	if !ok {
+	// 		break
+	// 	}
+	// }
+	// 2) for range 阻塞，等待关闭close channel
+	for ok := range exitChan {
+		fmt.Println(ok)
+	}
+	fmt.Println("主线程结束！")
+}
+```      
+>(3).使用select解决阻塞           
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func producer3(intChan chan int) {
+	for i := 0; i < cap(intChan); i++ {
+		fmt.Println("生产者：", i)
+		intChan <- i
+	}
+	// 写完后关闭掉
+	close(intChan)
+}
+
+func consumer3(intChan chan int, exitChan chan bool) {
+	for {
+		v, ok := <-intChan
+		if ok {
+			fmt.Println("消费者：", v)
+		} else { // 读完了
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	exitChan <- true
+	close(exitChan)
+}
+
+func main() {
+	intChan := make(chan int, 10)
+	exitChan := make(chan bool, 1)
+	go producer3(intChan)
+	go consumer3(intChan, exitChan)
+
+	for {
+		select {
+		case _, ok := <-exitChan:
+			if ok {
+				fmt.Println("执行完毕！")
+				// break // break只是跳出select循环，可配合lable跳出
+				return
+			}
+		default:
+			fmt.Println("读不到，执行其他的！")
+			time.Sleep(time.Second) // 此处添加Sleep才会看到效果，否则打印太多了找不到输出
+		}
+	}
+	fmt.Println("主线程结束！")
+}
+```           
+>(4)自动生产消费      
+```go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func producer4(p chan<- int) {
+	for i := 0; i < 10; i++ {
+		p <- i //主线程不能产生死锁,所以此处报错
+		fmt.Println("send:", i)
+	}
+}
+
+//自动消费
+func autoConsumer(ch <-chan int) {
+	for {
+		select {
+		case ws := <-ch:
+			fmt.Println("fmt print", ws)
+		default:
+			time.Sleep(1000 * time.Millisecond)
+		}
+	}
+}
+
+func main() {
+	ch := make(chan int)
+	//只生产和消费10条记录
+	//持续生产与消费, high起来
+	go func() {
+		for { //不断生产,一次10条
+			producer4(ch)
+		}
+	}()
+	go autoConsumer(ch)
+
+	for {
+		//心跳
+		time.Sleep(time.Second)
+	}
+
+}
+```
