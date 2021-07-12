@@ -14,8 +14,9 @@ go语言实践
 ## 11.go的值传递和引用传递
 ## 12.go的context包
 ## 13.go调度中阻塞都有那些方式
-## 14.
-## 15.
+## 14.go 怎么实现func的自定义参数
+## 15.用go手写生产者和消费者
+## 16.GoLang内存模型
 # 问题答案
 ## 1.进程、线程和协程的区别
 >进程是一个具有一定独立功能的程序在一个数据集上的一次动态执行的过程，是操作系统进行资源分配和调度的一个独立单位，是应用程序运行的载体。                
@@ -1801,3 +1802,60 @@ func main() {
 
 }
 ```
+## 16.GoLang内存模型
+>Go语言的内存模型规定了一个goroutine可以看到另外一个goroutine修改同一个变量的值的条件，这类似java内存模型中内存可见性问题。          
+>当多个goroutine并发同时存取同一个数据时必须把并发的存取的操作顺序化，
+>在go中可以实现操作顺序化的工具有高级的通道（channel）通信和同步原语比如sync包中的Mutex(互斥锁)、RWMutex(读写锁)或者和sync/atomic中的原子操作。            
+>           
+>为了保证多goroutine下读取共享数据的正确性，go中引入happens before原则，即在go程序中定义了多个内存操作执行的一种偏序关系。
+>如果操作e1先于e2发生，那么e2 happens after e1,如果e1操作既不先于e2发生又不晚于e2发生，那么e1操作与e2操作并发发生。             
+ 在单一goroutine中Happens Before所要表达的顺序就是程序执行的顺序，happens before原则指出在单一goroutine中当满足下面条件时候，对一个变量的写操作w1对读操作r1可见：              
+ 读操作r1没有发生在写操作w1前               
+ 在读操作r1之前，写操作w1之后没有其他的写操作w2对变量进行了修改                     
+ 在一个goroutine里面，不存在并发，所以对变量的读操作r1总是对最近的一个写操作w1的内容可见，但是在多goroutine下则需要满足下面条件才能保证写操作w1对读操作r1可见：                   
+ 写操作w1先于读操作r1               
+ 任何对变量的写操作w2要先于写操作w1或者晚于读操作r1                       
+ 当有多个goroutines并发访问变量时候，就需要引入同步机制来建立happen-before条件来确保读操作r1对写操作w1写的内容可见。                
+>           
+>需要注意的是在go内存模型中将多个goroutine中用到的全局变量初始化为它的类型零值在内被视为一次写操作，
+>另外当读取一个类型大小比机器字长大的变量的值时候表现为是对多个机器字的多次读取，这个行为是未知的，
+>go中使用sync/atomic包中的Load和Store操作可以解决这个问题。                   
+>                   
+>解决多goroutine下共享数据可见性问题的方法是在访问共享数据时候施加一定的同步措施:          
+>(1).同步         
+>[1].初始化        
+ 程序的初始化是发生在一个goroutine内的，这个goroutine可以创建多个新的goroutine，创建的goroutine和当前的goroutine可以并发的运行。         
+>如果在一个goroutine所在的源码包parent里面通过import命令导入了包child,那么child包里面go文件的初始化方法的执行会happens before 于包parent里面的初始化方法执行。             
+>[2].创建goroutine            
+go语句启动一个新的goroutine的动作happen before该新goroutine的运行       
+>[3].销毁goroutine            
+ 一个goroutine的销毁操作并不能确保happen before程序中的任何事件。            
+>[4].通道通信       
+>在go中通道是用来解决多个goroutines之间进行同步的主要措施，在多个goroutines中，每个对通道进行写操作的goroutine都对应着一个从通道读操作的goroutine。          
+>有缓冲通道          
+ 在有缓冲的通道时候向通道写入一个数据总是 happen before 这个数据被从通道中读取完成   
+>关闭通道的操作 happen before 从通道接受0值（关闭通道后会向通道发送一个0值）         
+>在有缓冲通道中通过向通道写入一个数据总是 happen before 这个数据被从通道中读取完成，这个happen before规则使多个goroutine中对共享变量的并发访问变成了可预见的串行化操作。                             
+>       
+>无缓冲通道              
+ 对应无缓冲的通道来说从通道接受（获取叫做读取）元素 happen before 向通道发送（写入）数据完成      
+>在无缓冲通道中从通道读取数据的操作 happen before 向通道写入数据完毕的操作，这个happen before规则使多个goroutine中对共享变量的并发访问变成了可预见的串行化操作。               
+>       
+>规则抽象           
+>从容量为C的通道接受第K个元素 happen before 向通道第k+C次写入完成，比如从容量为1的通道接受第3个元素 happen before 向通道第3+1次写入完成。           
+ 这个规则对有缓冲通道和无缓冲通道的情况都适用，有缓冲的通道可以实现信号量计数的功能，比如通道的容量可以认为是最大信号量的个数，
+>通道内当前元素个数可以认为是剩余的信号量个数，向通道写入（发送）一个元素可以认为是获取一个信号量，从通道读取（接受）一个元素可以认为是释放一个信号量，
+>所以有缓冲的通道可以作为限制并发数的一个通用手段               
+>           
+>       
+>(2).锁（locks）           
+>sync包实现了两个锁类型，分别为 sync.Mutex（互斥锁）和 sync.RWMutex（读写锁）。          
+ 对应任何sync.Mutex or sync.RWMutex类型的变量I来说调用n次 l.Unlock() 操作 happen before 调用m次l.Lock()操作返回，其中n<m。         
+ 对任何一个sync.RWMutex类型的变量l来说，存在一个次数n,调用l.RLock操作happens after调用n次l.Unlock（释放写锁）并且相应的l.RUnlock happen before 调用n+1次 l.Lock（写锁）             
+>               
+>(3).一次执行（Once）     
+>sync包提供了在多个goroutine存在的情况下进行安全初始化的一种机制，这个机制也就是提供的Once类型。                   
+>多goroutine情况下,多个goroutine可以同时执行once.Do(f)方法，其中f是一个函数，但是同时只有一个goroutine可以真正运行传递的f函数，其他的goroutine则会阻塞直到运行f的goroutine运行f完毕。                             
+ 多goroutine下同时调用once.Do(f)时候，真正执行f()函数的goroutine， happen before任何其他由于调用once.Do(f)而被阻塞的goroutine返回       
+>       
+>参考 https://ifeve.com/golang-mem/                                                
